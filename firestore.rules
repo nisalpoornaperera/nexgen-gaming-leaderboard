@@ -1,0 +1,56 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAnonymousUser() {
+      return isSignedIn()
+        && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+
+    // Replace this placeholder with the Firebase Authentication UID in firebase-config.js.
+    function isOperator() {
+      return isSignedIn()
+        && request.auth.uid == 'REPLACE_WITH_OPERATOR_UID';
+    }
+
+    match /tournaments/matfest-2026/teams/{teamId} {
+      allow read: if true;
+      allow create: if isAnonymousUser()
+        && request.resource.data.keys().hasOnly([
+          'teamName', 'players', 'memberCount', 'kills', 'registeredAt', 'createdBy'
+        ])
+        && request.resource.data.teamName is string
+        && request.resource.data.teamName.size() > 0
+        && request.resource.data.teamName.size() <= 60
+        && request.resource.data.players is string
+        && request.resource.data.players.size() > 0
+        && request.resource.data.players.size() <= 180
+        && (request.resource.data.memberCount == 2 || request.resource.data.memberCount == 3)
+        && request.resource.data.kills == 0
+        && request.resource.data.registeredAt is timestamp
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if isOperator();
+    }
+
+    // Contact numbers are never readable by the public leaderboard.
+    match /tournaments/matfest-2026/contacts/{teamId} {
+      allow create: if isAnonymousUser()
+        && request.resource.data.keys().hasOnly(['phone', 'createdBy', 'registeredAt'])
+        && request.resource.data.phone is string
+        && request.resource.data.phone.size() > 0
+        && request.resource.data.phone.size() <= 40
+        && request.resource.data.registeredAt is timestamp
+        && request.resource.data.createdBy == request.auth.uid;
+      allow read, update, delete: if isOperator();
+    }
+
+    match /tournaments/matfest-2026/settings/leaderboard {
+      allow read: if true;
+      allow write: if isOperator();
+    }
+  }
+}

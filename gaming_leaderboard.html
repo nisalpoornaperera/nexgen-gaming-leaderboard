@@ -74,11 +74,23 @@
         <div id="loginModal" class="fixed inset-0 bg-black/80 z-50 hidden flex items-center justify-center backdrop-blur-sm">
             <div class="bg-slate-800 border border-slate-600 rounded-xl p-8 max-w-sm w-full mx-4 shadow-2xl">
                 <h3 class="text-2xl font-bold text-center text-white mb-6 uppercase tracking-wider">Operator Access</h3>
-                <p class="text-slate-400 text-center mb-4 text-sm">Enter the operator PIN to access the dashboard.</p>
-                <input type="password" id="operatorPin" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-center text-2xl tracking-[0.5em] text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 mb-6" maxlength="4">
+                <p id="operator-login-description" class="text-slate-400 text-center mb-4 text-sm">Sign in with the Firebase operator account.</p>
+                <div id="operator-credentials" class="hidden space-y-4 mb-6">
+                    <div>
+                        <label for="operator-email" class="block text-sm font-medium text-slate-300 mb-2">Email</label>
+                        <input type="email" id="operator-email" autocomplete="username" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500">
+                    </div>
+                    <div>
+                        <label for="operator-password" class="block text-sm font-medium text-slate-300 mb-2">Password</label>
+                        <input type="password" id="operator-password" autocomplete="current-password" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500">
+                    </div>
+                </div>
+                <div id="operator-pin-group" class="mb-6">
+                    <input type="password" id="operatorPin" autocomplete="one-time-code" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-center text-2xl tracking-[0.5em] text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500" maxlength="4">
+                </div>
                 <div class="flex space-x-3">
-                    <button onclick="closeLoginModal()" class="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-bold transition-colors">Cancel</button>
-                    <button onclick="verifyOperatorLogin()" class="flex-1 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-bold transition-colors">Login</button>
+                    <button type="button" onclick="closeLoginModal()" class="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-bold transition-colors">Cancel</button>
+                    <button type="button" onclick="verifyOperatorLogin()" class="flex-1 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-bold transition-colors">Login</button>
                 </div>
             </div>
         </div>
@@ -176,7 +188,7 @@
                             <p class="mt-1 text-xs text-slate-400">Points a team needs to qualify for a prize.</p>
                         </div>
                         <div class="flex gap-2">
-                            <input id="raffle-threshold-input" type="number" min="1" step="1" inputmode="numeric" aria-label="Points required for raffle qualification" class="w-28 bg-slate-950 border border-slate-600 rounded-md px-3 py-2 text-center font-bold text-white focus:outline-none focus:border-rose-400 focus:ring-1 focus:ring-rose-400">
+                            <input id="raffle-threshold-input" type="number" min="1" step="1" inputmode="numeric" aria-label="Points required for prize qualification" class="w-28 bg-slate-950 border border-slate-600 rounded-md px-3 py-2 text-center font-bold text-white focus:outline-none focus:border-rose-400 focus:ring-1 focus:ring-rose-400">
                             <button type="submit" class="bg-rose-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-rose-500">Apply</button>
                         </div>
                     </form>
@@ -213,16 +225,17 @@
 
     </main>
 
+    <script src="./firebase-config.js"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, deleteDoc, onSnapshot, doc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, writeBatch, onSnapshot, doc, updateDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Global configuration injection
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'demo-tournament-id';
         const requestedView = new URLSearchParams(window.location.search).get('view');
         const initialView = ['operator', 'register'].includes(requestedView) ? requestedView : 'users';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const firebaseConfig = window.MATFEST_FIREBASE_CONFIG || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null);
+        const operatorUid = window.MATFEST_OPERATOR_UID || '';
+        const tournamentId = 'matfest-2026';
         const useLocalDemo = !firebaseConfig?.apiKey || firebaseConfig.apiKey === 'mock-key';
         const localTeamsKey = 'nexgen-tourney-teams';
         const raffleThresholdKey = 'nexgen-tourney-raffle-threshold';
@@ -244,6 +257,10 @@
         let currentUserId = null;
         let teamsData = []; // Array to hold team objects
         let isOperatorAuthed = false; // Simple local flag for tab access
+        let contactsByTeamId = {};
+        let stopTeamSync = null;
+        let stopSettingsSync = null;
+        let stopContactSync = null;
         const storedRaffleThreshold = Number.parseInt(localStorage.getItem(raffleThresholdKey), 10);
         let raffleThreshold = Number.isInteger(storedRaffleThreshold) && storedRaffleThreshold > 0 ? storedRaffleThreshold : 50;
 
@@ -263,6 +280,12 @@
         const raffleThresholdInput = document.getElementById('raffle-threshold-input');
         const memberCountInput = document.getElementById('reg-member-count');
         const playerInputs = document.getElementById('player-inputs');
+        const operatorCredentials = document.getElementById('operator-credentials');
+        const operatorPinGroup = document.getElementById('operator-pin-group');
+        const operatorLoginDescription = document.getElementById('operator-login-description');
+        const operatorEmailInput = document.getElementById('operator-email');
+        const operatorPasswordInput = document.getElementById('operator-password');
+        const operatorPinInput = document.getElementById('operatorPin');
         const userQrCode = document.getElementById('user-qr-code');
         const operatorQrCode = document.getElementById('operator-qr-code');
         const userPageUrl = document.getElementById('user-page-url');
@@ -305,6 +328,67 @@
             updateUI();
         }
 
+        function getTeamsRef() {
+            return collection(db, 'tournaments', tournamentId, 'teams');
+        }
+
+        function getTeamRef(teamId) {
+            return doc(db, 'tournaments', tournamentId, 'teams', teamId);
+        }
+
+        function getContactRef(teamId) {
+            return doc(db, 'tournaments', tournamentId, 'contacts', teamId);
+        }
+
+        function getSettingsRef() {
+            return doc(db, 'tournaments', tournamentId, 'settings', 'leaderboard');
+        }
+
+        function configureOperatorLogin() {
+            const usingFirebase = !useLocalDemo;
+            operatorCredentials.classList.toggle('hidden', !usingFirebase);
+            operatorPinGroup.classList.toggle('hidden', usingFirebase);
+            operatorLoginDescription.textContent = usingFirebase
+                ? 'Sign in with the Firebase operator account.'
+                : 'Enter the operator PIN to access the dashboard.';
+        }
+
+        function stopOperatorContactSync() {
+            if (stopContactSync) {
+                stopContactSync();
+                stopContactSync = null;
+            }
+            contactsByTeamId = {};
+        }
+
+        function initializeSettingsData() {
+            if (stopSettingsSync) stopSettingsSync();
+
+            stopSettingsSync = onSnapshot(getSettingsRef(), (snapshot) => {
+                const storedThreshold = Number(snapshot.data()?.qualificationThreshold);
+                if (Number.isInteger(storedThreshold) && storedThreshold > 0) {
+                    raffleThreshold = storedThreshold;
+                    updateUI();
+                }
+            }, (error) => {
+                console.error('Firestore settings error:', error);
+            });
+        }
+
+        function initializeOperatorContactSync() {
+            stopOperatorContactSync();
+            stopContactSync = onSnapshot(collection(db, 'tournaments', tournamentId, 'contacts'), (snapshot) => {
+                contactsByTeamId = {};
+                snapshot.forEach((contact) => {
+                    contactsByTeamId[contact.id] = contact.data();
+                });
+                if (isOperatorAuthed) renderOperatorDashboard();
+            }, (error) => {
+                console.error('Firestore contacts error:', error);
+                showMsg('Unable to load team contact details.', 'error');
+            });
+        }
+
         async function setupAuth() {
             if (useLocalDemo) {
                 currentUserId = 'local-demo-user';
@@ -312,21 +396,32 @@
                 return;
             }
 
+            onAuthStateChanged(auth, (user) => {
+                currentUserId = user?.uid || null;
+
+                if (!user) {
+                    isOperatorAuthed = false;
+                    stopOperatorContactSync();
+                    return;
+                }
+
+                isOperatorAuthed = Boolean(operatorUid) && user.uid === operatorUid;
+                initializeRealtimeData();
+                initializeSettingsData();
+
+                if (isOperatorAuthed) {
+                    initializeOperatorContactSync();
+                } else {
+                    stopOperatorContactSync();
+                }
+            });
+
             try {
                 if (initialAuthToken) {
                     await signInWithCustomToken(auth, initialAuthToken);
-                } else {
+                } else if (!auth.currentUser) {
                     await signInAnonymously(auth);
                 }
-                
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        currentUserId = user.uid;
-                        initializeRealtimeData();
-                    } else {
-                        currentUserId = null;
-                    }
-                });
             } catch (error) {
                 console.error("Auth Error:", error);
                 showMsg("Authentication failed. Check console.", "error");
@@ -335,22 +430,15 @@
 
         function initializeRealtimeData() {
             if (!currentUserId) return;
-            
-            // STRICT PATH REQUIREMENT: public data collection
-            const teamsRef = collection(db, 'artifacts', appId, 'public', 'data', 'teams');
-            
-            // No complex queries. Fetch all and process in JS.
-            onSnapshot(teamsRef, (snapshot) => {
+
+            if (stopTeamSync) stopTeamSync();
+            stopTeamSync = onSnapshot(getTeamsRef(), (snapshot) => {
                 loadingSpinner.classList.add('hidden');
-                
                 teamsData = [];
-                snapshot.forEach((doc) => {
-                    teamsData.push({ id: doc.id, ...doc.data() });
+                snapshot.forEach((team) => {
+                    teamsData.push({ id: team.id, ...team.data() });
                 });
-                
-                // Process and Render data
                 updateUI();
-                
             }, (error) => {
                 console.error("Firestore error:", error);
                 showMsg("Failed to load live data.", "error");
@@ -471,6 +559,8 @@
                 const kills = team.kills || 0;
                 const memberCount = getTeamMemberCount(team);
                 const points = getTeamPoints(team);
+                const contact = contactsByTeamId[team.id];
+                const phone = contact?.phone || team.phone || 'Contact unavailable';
                 const card = document.createElement('div');
                 card.className = "bg-slate-900 border border-slate-700 rounded-xl p-5 hover:border-rose-500/50 transition-colors shadow-lg";
                 
@@ -478,7 +568,7 @@
                     <div class="flex justify-between items-start mb-4">
                         <div>
                             <h3 class="font-bold text-lg text-white">${escapeHtml(team.teamName)}</h3>
-                            <p class="text-xs text-slate-400"><i class="fa-solid fa-phone mr-1"></i> ${escapeHtml(team.phone)}</p>
+                            <p class="text-xs text-slate-400"><i class="fa-solid fa-phone mr-1"></i> ${escapeHtml(phone)}</p>
                             <p class="mt-1 text-xs text-slate-500">${memberCount} members &middot; ${formatPoints(points)} points</p>
                         </div>
                         <button type="button" title="Remove group" aria-label="Remove ${escapeHtml(team.teamName)}" class="h-9 w-9 text-rose-300 transition-colors hover:text-rose-100" onclick="removeTeam('${team.id}')"><i class="fa-solid fa-trash"></i></button>
@@ -540,16 +630,22 @@
                     saveLocalTeams();
                     updateUI();
                 } else {
-                    const teamsRef = collection(db, 'artifacts', appId, 'public', 'data', 'teams');
-                    await addDoc(teamsRef, {
+                    const teamRef = doc(getTeamsRef());
+                    const registrationBatch = writeBatch(db);
+                    registrationBatch.set(teamRef, {
                         teamName,
                         players: playerNames.join(', '),
-                        phone,
                         memberCount,
                         kills: 0,
                         registeredAt: serverTimestamp(),
                         createdBy: currentUserId
                     });
+                    registrationBatch.set(getContactRef(teamRef.id), {
+                        phone,
+                        createdBy: currentUserId,
+                        registeredAt: serverTimestamp()
+                    });
+                    await registrationBatch.commit();
                 }
                 
                 showMsg("Team Registered Successfully!", "success");
@@ -565,7 +661,7 @@
             }
         });
 
-        raffleThresholdForm.addEventListener('submit', (event) => {
+        raffleThresholdForm.addEventListener('submit', async (event) => {
             event.preventDefault();
             if (!isOperatorAuthed) return;
 
@@ -576,10 +672,23 @@
                 return;
             }
 
-            raffleThreshold = nextThreshold;
-            localStorage.setItem(raffleThresholdKey, raffleThreshold);
-            updateUI();
-            showMsg(`Prize qualification updated to ${raffleThreshold} points.`, 'success');
+            try {
+                if (useLocalDemo) {
+                    raffleThreshold = nextThreshold;
+                    localStorage.setItem(raffleThresholdKey, raffleThreshold);
+                    updateUI();
+                } else {
+                    await setDoc(getSettingsRef(), {
+                        qualificationThreshold: nextThreshold,
+                        updatedAt: serverTimestamp(),
+                        updatedBy: currentUserId
+                    }, { merge: true });
+                }
+                showMsg(`Prize qualification updated to ${nextThreshold} points.`, 'success');
+            } catch (error) {
+                console.error('Error updating qualification threshold:', error);
+                showMsg('Failed to update prize qualification.', 'error');
+            }
         });
 
         memberCountInput.addEventListener('change', renderPlayerInputs);
@@ -600,8 +709,7 @@
                     saveLocalTeams();
                     updateUI();
                 } else {
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'teams', teamId);
-                    await updateDoc(docRef, { kills: newKills });
+                    await updateDoc(getTeamRef(teamId), { kills: newKills });
                     // Note: The UI updates automatically via onSnapshot listener
                 }
             } catch (error) {
@@ -622,8 +730,10 @@
                     saveLocalTeams();
                     updateUI();
                 } else {
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'teams', teamId);
-                    await deleteDoc(docRef);
+                    const deletionBatch = writeBatch(db);
+                    deletionBatch.delete(getTeamRef(teamId));
+                    deletionBatch.delete(getContactRef(teamId));
+                    await deletionBatch.commit();
                 }
                 showMsg(`${team.teamName} was removed.`, 'success');
             } catch (error) {
@@ -685,8 +795,13 @@
                 return;
             }
             loginModal.classList.remove('hidden');
-            document.getElementById('operatorPin').value = '';
-            document.getElementById('operatorPin').focus();
+            if (useLocalDemo) {
+                operatorPinInput.value = '';
+                operatorPinInput.focus();
+            } else {
+                operatorPasswordInput.value = '';
+                operatorEmailInput.focus();
+            }
         };
 
         window.closeLoginModal = function() {
@@ -701,28 +816,64 @@
             }
         };
 
-        window.verifyOperatorLogin = function() {
-            const pin = document.getElementById('operatorPin').value;
-            if (pin === "2536") { // Simple mock PIN requirement
+        window.verifyOperatorLogin = async function() {
+            if (useLocalDemo) {
+                if (operatorPinInput.value === '2536') {
+                    isOperatorAuthed = true;
+                    closeLoginModal();
+                    switchTab('operator');
+                    showMsg('Operator Terminal Unlocked', 'success');
+                } else {
+                    showMsg('Invalid PIN. Access Denied.', 'error');
+                    operatorPinInput.value = '';
+                }
+                return;
+            }
+
+            const email = operatorEmailInput.value.trim();
+            const password = operatorPasswordInput.value;
+            if (!email || !password) {
+                showMsg('Enter the operator email and password.', 'error');
+                return;
+            }
+
+            try {
+                await signOut(auth);
+                const credential = await signInWithEmailAndPassword(auth, email, password);
+                if (!operatorUid || credential.user.uid !== operatorUid) {
+                    await signOut(auth);
+                    await signInAnonymously(auth);
+                    throw new Error('This account is not configured as the tournament operator.');
+                }
+
                 isOperatorAuthed = true;
                 closeLoginModal();
                 switchTab('operator');
-                showMsg("Operator Terminal Unlocked", "success");
-            } else {
-                showMsg("Invalid PIN. Access Denied.", "error");
-                document.getElementById('operatorPin').value = '';
+                showMsg('Operator Terminal Unlocked', 'success');
+            } catch (error) {
+                console.error('Operator sign-in error:', error);
+                if (!auth.currentUser) await signInAnonymously(auth);
+                showMsg(error.message || 'Operator sign-in failed.', 'error');
             }
         };
 
-        window.logoutOperator = function() {
+        window.logoutOperator = async function() {
             isOperatorAuthed = false;
+            if (!useLocalDemo) {
+                stopOperatorContactSync();
+                await signOut(auth);
+                await signInAnonymously(auth);
+            }
             window.history.replaceState({}, '', getViewUrl('users'));
             switchTab('leaderboard');
-            showMsg("Terminal Locked", "success");
+            showMsg('Terminal Locked', 'success');
         };
 
-        // Allow Enter key to submit PIN
-        document.getElementById('operatorPin').addEventListener('keypress', function (e) {
+        operatorPinInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') verifyOperatorLogin();
+        });
+
+        operatorPasswordInput.addEventListener('keydown', function (e) {
             if (e.key === 'Enter') verifyOperatorLogin();
         });
 
@@ -756,6 +907,7 @@
         // Initialize Application
         window.addEventListener('DOMContentLoaded', () => {
             renderPlayerInputs();
+            configureOperatorLogin();
             setupAuth();
             if (initialView === 'operator') {
                 document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
