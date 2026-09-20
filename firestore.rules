@@ -11,10 +11,9 @@ service cloud.firestore {
         && request.auth.token.firebase.sign_in_provider == 'anonymous';
     }
 
-    // Replace this placeholder with the Firebase Authentication UID in firebase-config.js.
     function isOperator() {
       return isSignedIn()
-        && request.auth.uid == 'REPLACE_WITH_OPERATOR_UID';
+        && request.auth.uid == 'OsRCHx02bFMg2cRCJWHvu7VtRC83';
     }
 
     match /tournaments/matfest-2026/teams/{teamId} {

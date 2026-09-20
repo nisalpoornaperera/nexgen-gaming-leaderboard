@@ -13,10 +13,9 @@ GitHub Pages remains the free website host. Firebase Firestore is the shared, fr
 
 ## Configure this repository
 
-1. Replace `window.MATFEST_FIREBASE_CONFIG = null;` in [firebase-config.js](firebase-config.js) with the copied Firebase configuration object.
-2. Set `window.MATFEST_OPERATOR_UID` in [firebase-config.js](firebase-config.js) to the operator UID.
-3. Replace both occurrences of `REPLACE_WITH_OPERATOR_UID` in [firestore.rules](firestore.rules) with that same UID.
-4. From this repository, deploy the Firestore rules:
+1. Confirm the Firebase web configuration and operator UID in [firebase-config.js](firebase-config.js) match the Firebase project.
+2. Confirm the operator UID in [firestore.rules](firestore.rules) matches the operator account.
+3. From this repository, deploy the Firestore rules:
 
 ```powershell
 npx firebase-tools login
@@ -24,7 +23,7 @@ npx firebase-tools use --add
 npx firebase-tools deploy --only firestore:rules
 ```
 
-5. Commit and push the configuration. The GitHub Pages workflow automatically publishes the site.
+4. Commit and push the configuration. The GitHub Pages workflow automatically publishes the site.
 
 The Firebase web configuration is safe to publish. It identifies the Firebase project, while [firestore.rules](firestore.rules) controls access. Do not commit the operator email password.
 
